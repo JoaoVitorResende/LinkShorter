@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 )
 
 const caracteres = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -18,6 +19,14 @@ func NewHandler(db map[string]string) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
+
+	r.Use(cors.Handler(cors.Options{
+        AllowedOrigins:   []string{"http://localhost:3000"},
+        AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+        AllowedHeaders:   []string{"Content-Type"},
+        AllowCredentials: false,
+        MaxAge:           300,
+    }))
 
 	r.Post("/api/shorten", handlePost(db))
 	r.Get("/{code}", handleGet(db))
@@ -34,15 +43,16 @@ type Response struct {
 }
 
 func handlePost(db map[string]string) http.HandlerFunc {
-	var body PostBody
+	
 	return func(w http.ResponseWriter, r *http.Request) {
-
+		var body PostBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			sendJson(w, Response{Error: "invalid body"}, http.StatusUnprocessableEntity)
 			return
 		}
 		if _, err := url.Parse(body.URL); err != nil {
 			sendJson(w, Response{Error: "invalid url passed"}, http.StatusBadRequest)
+			return
 		}
 		code := genCode()
 		db[code] = body.URL
