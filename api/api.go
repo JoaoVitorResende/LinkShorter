@@ -49,7 +49,7 @@ func handlePost(db map[string]string) http.HandlerFunc {
 		sendJson(w, Response{Data: code}, http.StatusCreated)
 	}
 }
-//curl -X POST http://localhost:8080/api/shorten -d '{"url":"https://www.youtube.com/watch?v=Hq5mVt-iozQ&list=RDMM&index=27"}'
+//curl -X POST http://localhost:8080/api/shorten -d '{"url":"https://www.google.com"}'
 func handleGet(db map[string]string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		url := chi.URLParam(r, "code")
