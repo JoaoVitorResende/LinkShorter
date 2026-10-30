@@ -2,33 +2,62 @@
 
 # URL Shortener
 
-A minimal URL shortener built with Go and [chi](https://github.com/go-chi/chi). It exposes a small HTTP API to generate short codes for long URLs and redirect visitors when they hit those codes.
+A minimal URL shortener built with Go and [chi](https://github.com/go-chi/chi), organized with Clean Architecture and DDD concepts. It exposes a small HTTP API to generate short codes for long URLs and redirect visitors when they hit those codes.
 
 ## Features
 
-- Shorten any valid URL into an 8-character alphanumeric code
+- Shorten any valid http/https URL into a 6-character alphanumeric code
 - Redirect from a short code to the original URL
-- In-memory storage (no external database required)
-- Structured logging via `log/slog`
+- In-memory storage, safe for concurrent access (no external database required)
+- Domain validation: a link can only be created with a valid URL
 - Request logging, panic recovery and request ID middleware (via chi)
+- CORS enabled for `http://localhost:3000`
 
 ## Requirements
 
-- Go 1.22 or later (uses `for i := range n` integer range and `math/rand/v2`)
+- Go 1.22 or later (uses `math/rand/v2`)
 
 ## Project Structure
 
 ```
 .
-├── main.go          # Entry point, HTTP server setup
-└── api/
-    └── handler.go    # Routes, handlers and code generation logic
+├── cmd/api/
+│   └── main.go                  # Entry point, wires all layers together
+├── internal/
+│   ├── domain/                  # Business rules, depends on nothing
+│   │   ├── link.go              # Link entity, validated by NewLink
+│   │   ├── repository.go        # LinkRepository interface
+│   │   └── service/
+│   │       └── generator.go     # Short code generator
+│   ├── exception/
+│   │   └── errors.go            # Domain errors (ErrEmptyURL, ErrInvalidURL, ErrNotFound, ErrCodeTaken...)
+│   ├── application/             # Use cases
+│   │   ├── shorten.go           # Generates a code, creates and saves the link
+│   │   └── resolve.go           # Finds the original URL by code
+│   ├── infrastructure/
+│   │   └── link_repository.go   # In-memory repository (map + RWMutex)
+│   └── interfaces/httpapi/      # HTTP layer
+│       ├── handler.go           # Routes and handlers (chi)
+│       ├── dto.go               # Request/response bodies
+│       └── error.go             # Maps domain errors to HTTP status
+├── dockerfile
+├── docker-compose.yml
+├── go.mod
+└── go.sum
 ```
+
+### Dependency rule
+
+```
+interfaces/httpapi -> application -> domain <- infrastructure
+```
+
+Dependencies always point to the domain. The domain does not know about HTTP, chi or the storage. Replacing the in-memory repository with a database only affects `infrastructure/`.
 
 ## Running the project
 
 ```bash
-go run main.go
+go run ./cmd/api
 ```
 
 The server starts on port `8080`.
@@ -54,6 +83,7 @@ Content-Type: application/json
 
 ```bash
 curl -X POST http://localhost:8080/api/shorten \
+  -H "Content-Type: application/json" \
   -d '{"url":"https://www.google.com"}'
 ```
 
@@ -61,23 +91,9 @@ curl -X POST http://localhost:8080/api/shorten \
 
 ```json
 {
-  "data": "aZ3kLm9Q"
-}
-```
-
-**Error response** — `422 Unprocessable Entity` (invalid JSON body)
-
-```json
-{
-  "error": "invalid body"
-}
-```
-
-**Error response** — `400 Bad Request` (invalid URL)
-
-```json
-{
-  "error": "invalid url passed"
+  "data": {
+    "code": "aZ3kLm"
+  }
 }
 ```
 
@@ -94,41 +110,21 @@ GET /{code}
 **Example**
 
 ```bash
-curl -i http://localhost:8080/aZ3kLm9Q
+curl -i http://localhost:8080/aZ3kLm
 ```
 
-**Success response** — `308 Permanent Redirect`
+**Success response** — `302 Found`
 
 Redirects to the original URL (e.g. `https://www.google.com`).
 
-**Error response** — `404 Not Found`
+### Errors
+
+All errors use the same body:
 
 ```json
 {
-  "error": "Url not found"
+  "error": "invalid url"
 }
 ```
 
-## How code generation works
-
-Each short code is 8 characters long, randomly picked from the set `A-Z`, `a-z`, `0-9` (62 possible characters), giving 62^8 (~218 trillion) possible combinations. See `genCode()` in `api/handler.go`.
-
-## Data storage
-
-URLs are stored in an in-memory `map[string]string` (`code -> original URL`). This means:
-
-- All data is lost when the server restarts
-- The map is not safe for concurrent access without external synchronization
-
-For production use, consider replacing the in-memory map with a persistent store (e.g. PostgreSQL, Redis) and adding a mutex or using a concurrent-safe map if the in-memory version is kept for testing.
-
-## Known limitations
-
-- No validation preventing duplicate short codes (collision is possible, though unlikely, with 62^8 combinations)
-- No uniqueness check for the same URL being shortened multiple times (each request creates a new code)
-- The handler for invalid URLs does not stop execution after sending the error response, so processing may continue unexpectedly
-- No authentication or rate limiting on the `/api/shorten` endpoint
-
-## License
-
-Not specified.
+| Status
